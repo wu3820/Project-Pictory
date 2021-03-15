@@ -1,0 +1,84 @@
+import requests
+import json
+import hmac
+import hashlib
+import time
+
+ACCESS_TOKEN = 'v2/NEdTamRFMjFzeTVwTXRQTzNNVlRSS1pVTHJwU3lJRHYvMjYxNDMwMzAwL2N1c3RvbWVyLzMva3U1NGVvOGt5OWdVNUg5cUlhSHQ1aF9PRDRTU2o0c0t3ZG1KSDlIdzlxdUtITGxOWTRRbXl0WFlITWRyckNhMGVrSEZsLVVIQmoza0JKNExjTDlBX01HWlBoS29ZUkxjS2tiVFptRW8wT2hKbU90YVNnUzdFbFBFRW9LdlpraGJZUjlYNmtUc1FONy1mU3l5UFBmMlJmM0hiVXBjazJWekN1X3E5NWtUS2RuQURhU3Z3LXV0ZG40OWowRDNGMmREMXgwX3B4SHp5NXZ5em1tQ09jcVdlQQ'
+LICENSE_URL = 'https://api.shutterstock.com/v2/images/licenses'
+
+def get_shutterstock_image_url(asset_id):
+    payload = {}
+    asset_info = {}
+    asset_info['image_id'] = asset_id
+    asset_info['metadata'] = {
+        "search_term": "",
+        "customer_id": "",
+        "geo_location": "",
+        "number_viewed": ""
+    }
+    payload['images'] = []
+    payload['images'].append(asset_info)
+    request_headers = {
+        'content-type': 'application/json',
+        'Authorization': f'Bearer {ACCESS_TOKEN}'
+    }
+    query_params = {'subscription_id': 53807998}
+    response = requests.request('POST', LICENSE_URL, params=query_params, json=payload, headers=request_headers)
+    if response.status_code == 200:
+        response_json = json.loads(response.text)
+        return response_json['data'][0]['download']['url']
+    else:
+        raise Exception(f'get_shutterstock_image_url failed{chr(10)}response text: {response.text}{chr(10)}response code: {response.status_code}{chr(10)}response reason: {response.reason}')        
+
+
+API_KEY = "NFKFzias7JkF35W3n9edUuQV1Rnn7udTDco3ZbvzlsXgiAzLXO0a15shkgbMNmXZ"
+PRIVATE_KEY = "jj3KH9VxRgU0MLILUNVB3KvfDlqgkVjrZcv9lZcwUO3z68eqsrTqJltu59oRW3j0"
+
+BASE_VIDEO_URL = "https://api.videoblocks.com"
+BASE_IMAGE_URL = "https://api.graphicstock.com"
+USER_ID = 'pictoryuser'
+
+def get_storyblocks_url(asset_id, asset_type):
+    resource = f'/api/v2/{asset_type}s/stock-item/download/{asset_id}'
+    expires = str(int(time.time()))
+    hmacBuilder = hmac.new(bytearray(PRIVATE_KEY + expires, 'utf-8'), resource.encode('utf-8'), digestmod=hashlib.sha256)
+    hmacHex = hmacBuilder.hexdigest()
+
+    query_params = {
+        'user_id': USER_ID,
+        'project_id': 'dev',
+        'APIKEY': API_KEY,
+        'EXPIRES': expires,
+        'HMAC': hmacHex
+    }
+    if asset_type == 'video':
+        url = BASE_VIDEO_URL + resource
+    elif asset_type == 'image':
+        url = BASE_IMAGE_URL + resource
+    request_headers = {'content-type': 'application/json'}
+    response = requests.request('GET', url, params=query_params, headers=request_headers)
+    if response.ok == True and response.status_code != 500 and response.text:
+        response_json = json.loads(response.text)
+        if response_json.get('MP4', None):
+            if response_json['MP4'].get('_720p', None):
+                return response_json['MP4']['_720p']
+            elif response_json['MP4'].get('_1080p', None):
+                return response_json['MP4']['_1080p']
+            elif response_json['MP4'].get('_2160p', None):
+                return response_json['MP4']['_2160p']
+        elif response_json.get('MOV', None):
+            if response_json['MOV'].get('_1080p', None):
+                return response_json['MOV']['_1080p']
+            elif response_json['MOV'].get('_2160p', None):
+                return response_json['MOV']['_2160p']
+        elif response_json.get('HDMP4', None):
+            return response_json['HDMP4']
+        elif response_json.get('HDMOV', None):
+            return response_json['HDMOV']
+        elif response_json.get('4KMOV', None):
+            return response_json['4KMOV']
+        else:
+            raise Exception(f'get_storyblocks_url failed: could not get correct response video format')
+    else:
+        raise Exception(f'get_storyblocks_url failed{chr(10)}response text: {response.text}{chr(10)}response code: {response.status_code}{chr(10)}response reason: {response.reason}')
