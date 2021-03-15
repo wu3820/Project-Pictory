@@ -1,0 +1,206 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+import os
+import tensorflow as tf
+from tensorflow.keras.preprocessing import image_dataset_from_directory
+import urllib.request
+
+
+train_df = pd.read_csv('train_df5.csv')
+validation_df = pd.read_csv('validation_df5.csv')
+
+
+'''Procedure for downloading images into correspoing directory'''
+def url_to_jpg(i, url, file_path):
+    
+    request=urllib.request.Request(url[1:-1],None,headers)
+    print(request)
+    filename = 'image-{}.jpg'.format(i)
+    full_path = os.path.join(file_path, filename)
+    response = urllib.request.urlopen(request)
+    data = response.read()
+    newFile = open(full_path, "wb")
+    newFile.write(data)
+    print('{} saved.'.format(filename))
+    return None
+
+ACCESS_TOKEN = "v2/NEdTamRFMjFzeTVwTXRQTzNNVlRSS1pVTHJwU3lJRHYvMjYxNDMwMzAwL2N1c3RvbWVyLzMva3U1NGVvOGt5OWdVNUg5cUlhSHQ1aF9PRDRTU2o0c0t3ZG1KSDlIdzlxdUtITGxOWTRRbXl0WFlITWRyckNhMGVrSEZsLVVIQmoza0JKNExjTDlBX01HWlBoS29ZUkxjS2tiVFptRW8wT2hKbU90YVNnUzdFbFBFRW9LdlpraGJZUjlYNmtUc1FONy1mU3l5UFBmMlJmM0hiVXBjazJWekN1X3E5NWtUS2RuQURhU3Z3LXV0ZG40OWowRDNGMmREMXgwX3B4SHp5NXZ5em1tQ09jcVdlQQ"
+headers = {'content-type': 'application/json',
+           'Authorization': f'Bearer {ACCESS_TOKEN}'}
+
+
+'''creating the directory path for our training data'''
+PATH = '/Users/wusongyuan/Desktop/image-dataset'
+train_dir = os.path.join(PATH,'train_dir')
+label1_dir = os.path.join(train_dir,'selected')
+label2_dir = os.path.join(train_dir, 'not_selected')
+validation_dir = os.path.join(PATH,'validation_dir')
+label3_dir = os.path.join(validation_dir, 'selected')
+label4_dir = os.path.join(validation_dir, 'not_selected')
+
+'''download the picutures by url in dataframe'''
+user_agent = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/84.0.4147.89 Safari/537.36 RuxitSynthetic/1.0 v6403476884 t38550 ath9b965f92 altpub'
+headers1={'User-Agent':user_agent,} #The assembled request
+
+headers2 = 'Authorization: Bearer $SHUTTERSTOCK_API_TOKEN'
+'''Write images with label into correspoing directory and subdirectory'''
+
+FILE_PATH = '/Users/wusongyuan/Desktop/image-dataset'
+'''
+i = 0
+for url, label in zip(train_df['image-corr'],train_df['Label']):
+    if label == 'Selected':
+        url_to_jpg(i, url, label1_dir)
+    elif label == 'Not Selected':
+        url_to_jpg(i, url, label2_dir)
+    i += 1
+
+i = 0
+for url, label in zip(validation_df['image_corr'],validation_df['Label']):
+    if label == 'Selected':
+        url_to_jpg(i, url, label3_dir)
+    elif label == 'Not Selected':
+        url_to_jpg(i, url, label4_dir)
+    i += 1
+'''
+
+BATCH_SIZE = 12
+IMAGE_SIZE = (160,160)
+
+train_dataset = image_dataset_from_directory(
+    train_dir,
+    shuffle = True,
+    batch_size = BATCH_SIZE,
+    image_size = IMAGE_SIZE
+    )
+
+validation_dataset = image_dataset_from_directory(
+    validation_dir,
+    shuffle = True,
+    batch_size = BATCH_SIZE,
+    image_size = IMAGE_SIZE
+    )
+
+'''shows the first nine images and their labels in train_dataset'''
+class_names = train_dataset.class_names
+
+plt.figure(figsize=(10, 10))
+for images, labels in train_dataset.take(1):
+  for i in range(9):
+    ax = plt.subplot(3, 3, i + 1)
+    plt.imshow(images[i].numpy().astype("uint8"))
+    plt.title(class_names[labels[i]])
+    plt.axis("off")
+
+'''split 20% data of validation_dataset into new test_dataset'''
+val_batches = tf.data.experimental.cardinality(validation_dataset)
+test_dataset = validation_dataset.take(val_batches // 5)
+validation_dataset = validation_dataset.skip(val_batches // 5)
+
+print('Number of validation batches: %d' % tf.data.experimental.cardinality(validation_dataset))
+print('Number of test batches: %d' % tf.data.experimental.cardinality(test_dataset))
+
+'''improving the data performance by using buffered prefetching'''
+AUTOTUNE = tf.data.experimental.AUTOTUNE
+
+train_dataset = train_dataset.prefetch(buffer_size=AUTOTUNE)
+validation_dataset = validation_dataset.prefetch(buffer_size=AUTOTUNE)
+test_dataset = test_dataset.prefetch(buffer_size=AUTOTUNE)
+
+'''introduce sample diversity to the training data'''
+data_augmentation = tf.keras.Sequential([
+  tf.keras.layers.experimental.preprocessing.RandomFlip('horizontal'),
+  tf.keras.layers.experimental.preprocessing.RandomRotation(0.2),
+])
+
+for image, _ in train_dataset.take(1):
+  plt.figure(figsize=(10, 10))
+  first_image = image[0]
+  for i in range(9):
+    ax = plt.subplot(3, 3, i + 1)
+    augmented_image = data_augmentation(tf.expand_dims(first_image, 0))
+    plt.imshow(augmented_image[0] / 255)
+    plt.axis('off')
+
+'''Rescaling the piexel values in our image'''
+preprocess_input = tf.keras.applications.mobilenet_v2.preprocess_input
+
+'''Create the base model from the pre-trained model MobileNet V2'''
+IMG_SHAPE = IMAGE_SIZE + (3,)
+base_model = tf.keras.applications.MobileNetV2(input_shape=IMG_SHAPE,
+                                               include_top=False,
+                                               weights='imagenet')
+'''feature extractor convert each 160*160*3 image into 5*5*1280 a block of features'''
+image_batch, label_batch = next(iter(train_dataset))
+feature_batch = base_model(image_batch)
+print(feature_batch.shape)
+
+'''Freeze the convolutional base'''
+base_model.trainable = False
+
+'''take a look at the base model architecture'''
+base_model.summary()
+
+'''add a classification head'''
+global_average_layer = tf.keras.layers.GlobalAveragePooling2D()
+feature_batch_average = global_average_layer(feature_batch)
+print(feature_batch_average.shape)
+
+prediction_layer = tf.keras.layers.Dense(1)
+prediction_batch = prediction_layer(feature_batch_average)
+print(prediction_batch.shape)
+
+'''chain data augmentation, rescaling, base model and feature extractor layers together'''
+inputs = tf.keras.Input(shape=(160, 160, 3))
+x = data_augmentation(inputs)
+x = preprocess_input(x)
+x = base_model(x, training=False)
+x = global_average_layer(x)
+x = tf.keras.layers.Dropout(0.001)(x)
+outputs = prediction_layer(x)
+model = tf.keras.Model(inputs, outputs)
+
+'''compile the model'''
+base_learning_rate = 0.005
+model.compile(optimizer=tf.keras.optimizers.Adam(lr=base_learning_rate),
+              loss=tf.keras.losses.BinaryCrossentropy(from_logits=True),
+              metrics=['accuracy'])
+model.summary()
+len(model.trainable_variables)
+
+'''train the model'''
+initial_epochs = 8
+'''conda config --add channels http://conda.anaconda.org/gurobiloss0, accuracy0 = model.evaluate(validation_dataset)
+
+print("initial loss: {:.2f}".format(loss0))
+print("initial accuracy: {:.2f}".format(accuracy0))'''
+
+history = model.fit(train_dataset,
+                    epochs=initial_epochs,
+                    validation_data=validation_dataset)
+
+'''plotting the learning curves'''
+acc = history.history['accuracy']
+val_acc = history.history['val_accuracy']
+
+loss = history.history['loss']
+val_loss = history.history['val_loss']
+
+plt.figure(figsize=(8, 8))
+plt.subplot(2, 1, 1)
+plt.plot(acc, label='Training Accuracy')
+plt.plot(val_acc, label='Validation Accuracy')
+plt.legend(loc='lower right')
+plt.ylabel('Accuracy')
+plt.ylim([min(plt.ylim()),1])
+plt.title('Training and Validation Accuracy')
+
+plt.subplot(2, 1, 2)
+plt.plot(loss, label='Training Loss')
+plt.plot(val_loss, label='Validation Loss')
+plt.legend(loc='upper right')
+plt.ylabel('Cross Entropy')
+plt.ylim([0,1.0])
+plt.title('Training and Validation Loss')
+plt.xlabel('epoch')
+plt.show()
